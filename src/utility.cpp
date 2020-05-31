@@ -1,9 +1,4 @@
-#ifndef UTILITY
-#define UTILITY
-
-#include <stdio.h>
-#include <stdint.h>
-
+#include "utility.hpp"
 
 /* Sign Extend */
 uint16_t sign_extend(uint16_t x, int bit_count){
@@ -17,5 +12,3 @@ uint16_t sign_extend(uint16_t x, int bit_count){
 uint16_t swap16(uint16_t x){
     return (x << 8) | (x >> 8);
 }
-
-#endif

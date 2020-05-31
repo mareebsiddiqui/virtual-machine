@@ -1,134 +1,98 @@
-#ifndef VM
-#define VM
+#include "vm.hpp"
 
-#include <iostream>
-#include <signal.h>
-#include <unistd.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <stdint.h>
-#include <string.h>
-#include <signal.h>
-
-#include <unistd.h>
-#include <fcntl.h>
-
-#include <sys/time.h>
-#include <sys/types.h>
-#include <sys/termios.h>
-#include <sys/mman.h>
-#include "buffer.h" //buffering methods
-#include "register.h" //enum of regs and traps
-#include "utility.h" //read image and image files
-
-class VirtualMachine{
-    /* Memory Storage */
-    /* 65536 locations */
-    uint16_t memory[UINT16_MAX];
-
-    /* Register Storage */
-    uint16_t reg[R_COUNT];  
-    int running;  
-
-    /* methods */
-    public:
-    VirtualMachine(int argc, const char* argv[]){
-        for (int j = 1; j < argc; ++j){
-            if (!read_image(argv[j])){
-                printf("failed to load image: %s\n", argv[j]);
-                exit(1);
-            }
+VirtualMachine::VirtualMachine(int argc, const char* argv[]){
+    for (int j = 1; j < argc; ++j){
+        if (!read_image(argv[j])){
+            printf("failed to load image: %s\n", argv[j]);
+            exit(1);
         }
-        /*setting up VM*/
-        signal(SIGINT, handle_interrupt);
-        disable_input_buffering();
-        enum { PC_START = 0x3000 };
-        reg[R_PC] = PC_START;
-        running = 1;
-    };
+    }
+    /*setting up VM*/
+    signal(SIGINT, handle_interrupt);
+    disable_input_buffering();
+    enum { PC_START = 0x3000 };
+    reg[R_PC] = PC_START;
+    running = 1;
+}
 
-    void shutdown(){
-        restore_input_buffering();
-    };
+void VirtualMachine::shutdown(){
+    restore_input_buffering();
+}
 
-    private:
-    void read_image_file(FILE* file){
-        /* the origin tells us where in memory to place the image */
-        uint16_t origin;
-        fread(&origin, sizeof(origin), 1, file);
-        origin = swap16(origin);
+void VirtualMachine::read_image_file(FILE* file){
+    /* the origin tells us where in memory to place the image */
+    uint16_t origin;
+    fread(&origin, sizeof(origin), 1, file);
+    origin = swap16(origin);
 
-        /* we know the maximum file size so we only need one fread */
-        uint16_t max_read = UINT16_MAX - origin;
-        uint16_t* p = memory + origin;
-        size_t read = fread(p, sizeof(uint16_t), max_read, file);
+    /* we know the maximum file size so we only need one fread */
+    uint16_t max_read = UINT16_MAX - origin;
+    uint16_t* p = memory + origin;
+    size_t read = fread(p, sizeof(uint16_t), max_read, file);
 
-        /* swap to little endian */
-        while (read-- > 0)
-        {
-            *p = swap16(*p);
-            ++p;
-        }
-    };
+    /* swap to little endian */
+    while (read-- > 0)
+    {
+        *p = swap16(*p);
+        ++p;
+    }
+}
 
+int VirtualMachine::read_image(const char* image_path){
+    FILE* file = fopen(image_path, "rb");
+    if (!file) { return 0; };
+    VirtualMachine::read_image_file(file);
+    fclose(file);
+    return 1;
+}
 
-    int read_image(const char* image_path){
-        FILE* file = fopen(image_path, "rb");
-        if (!file) { return 0; };
-        read_image_file(file);
-        fclose(file);
-        return 1;
-    };
+uint16_t VirtualMachine::check_key(){
+    fd_set readfds;
+    FD_ZERO(&readfds);
+    FD_SET(STDIN_FILENO, &readfds);
 
-    uint16_t check_key(){
-        fd_set readfds;
-        FD_ZERO(&readfds);
-        FD_SET(STDIN_FILENO, &readfds);
+    struct timeval timeout;
+    timeout.tv_sec = 0;
+    timeout.tv_usec = 0;
+    return select(1, &readfds, NULL, NULL, &timeout) != 0;
+};
 
-        struct timeval timeout;
-        timeout.tv_sec = 0;
-        timeout.tv_usec = 0;
-        return select(1, &readfds, NULL, NULL, &timeout) != 0;
-    };
+/* Memory Access */
+void VirtualMachine::mem_write(uint16_t address, uint16_t val){
+    memory[address] = val;
+}
 
-    /* Memory Access */
-    void mem_write(uint16_t address, uint16_t val){
-        memory[address] = val;
-    };
-
-    uint16_t mem_read(uint16_t address) {
-        if (address == MR_KBSR){
-            if (check_key()){
-                memory[MR_KBSR] = (1 << 15);
-                memory[MR_KBDR] = getchar();
-            }
-            else{
-                memory[MR_KBSR] = 0;
-            }
-        }
-        return memory[address];
-    };
-
-    void update_flags(uint16_t r){
-        if (reg[r] == 0){
-            reg[R_COND] = FL_ZRO;
-        }
-        else if (reg[r] >> 15){ /* a 1 in the left-most bit indicates negative */
-            reg[R_COND] = FL_NEG;
+uint16_t VirtualMachine::mem_read(uint16_t address) {
+    if (address == MR_KBSR){
+        if (check_key()){
+            memory[MR_KBSR] = (1 << 15);
+            memory[MR_KBDR] = getchar();
         }
         else{
-            reg[R_COND] = FL_POS;
+            memory[MR_KBSR] = 0;
         }
-    };
+    }
+    return memory[address];
+}
 
-    public:
-    void fetch_execute(){
-        while(running){
-            uint16_t instr = mem_read(reg[R_PC]++);
-            uint16_t op = instr >> 12;  //opcode fetched
-        
-        switch (op)
-        {
+void VirtualMachine::update_flags(uint16_t r){
+    if (reg[r] == 0){
+        reg[R_COND] = FL_ZRO;
+    }
+    else if (reg[r] >> 15){ /* a 1 in the left-most bit indicates negative */
+        reg[R_COND] = FL_NEG;
+    }
+    else{
+        reg[R_COND] = FL_POS;
+    }
+};
+
+void VirtualMachine::fetch_execute(){
+    while(running){
+        uint16_t instr = mem_read(reg[R_PC]++);
+        uint16_t op = instr >> 12;  //opcode fetched
+    
+        switch (op) {
             case OP_ADD:
                 /* ADD */
                 {
@@ -342,8 +306,8 @@ class VirtualMachine{
                         /* TRAP PUTSP */
                         {
                             /* one char per byte (two bytes per word)
-                               here we need to swap back to
-                               big endian format */
+                                here we need to swap back to
+                                big endian format */
                             uint16_t* c = memory + reg[R_R0];
                             while (*c)
                             {
@@ -376,8 +340,4 @@ class VirtualMachine{
                 break;
         }
     }
-
-    };
-};
-
-#endif
+}

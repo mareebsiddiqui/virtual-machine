@@ -65,8 +65,4 @@ enum
     TRAP_HALT = 0x25   /* halt the program */
 };
 
-
-
-
-
 #endif
