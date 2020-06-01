@@ -437,7 +437,6 @@ void VirtualMachine::start(){
                     case TRAP_HALT:
                         /* TRAP HALT */
                         /* stop the program */
-                        puts("HALT");
                         fflush(stdout);
                         running = false;
 
