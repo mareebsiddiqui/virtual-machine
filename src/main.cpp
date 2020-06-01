@@ -14,8 +14,8 @@ int main(int argc, const char* argv[])
     }
 
     /* Start VM */
-    VirtualMachine obj(argc, argv);
-    obj.fetch_execute();
-    obj.shutdown();
+    VirtualMachine machine(argv[1]);
+    machine.start();
+    machine.shutdown();
 
 }
